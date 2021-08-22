@@ -28,8 +28,10 @@ const unsigned int HL_CONFIRM_BLOCK_LENGTH = 1;
 const unsigned int PARITY_CONFIRM_BLOCK_LENGTH = 1;
 
 std::unordered_map<string, double> pendingtx;
+int thread_count; // 记录客户端线程数
 // locking the pendingtx queue
 SpinLock txlock;
+SpinLock thlock;
 
 void UsageMessage(const char *command);
 bool StrStartWith(const char *str, const char *pre);
@@ -42,7 +44,7 @@ int DelegateClient(ycsbc::DB *db, ycsbc::CoreWorkload *wl, const int num_ops,
   db->Init();
   ycsbc::Client client(*db, *wl);
   int oks = 0;
-  double tx_sleep_time = 1.0 / txrate;
+  double tx_sleep_time = 1.0 / txrate; // 模拟每秒进行的事务提交
   for (int i = 0; i < num_ops; ++i) {
     if (is_loading) {
       oks += client.DoInsert();
@@ -52,15 +54,18 @@ int DelegateClient(ycsbc::DB *db, ycsbc::CoreWorkload *wl, const int num_ops,
     }
   }
   db->Close();
+  thlock.lock();
+  thread_count--;
+  thlock.unlock();
   return oks;
 }
 
 // wakeup every interval second to poll,
 // when first started, the block height is start_block_height
+// interval 轮询间隔时间
 int StatusThread(string dbname, ycsbc::DB *db, double interval,
                  int start_block_height) {
   int cur_block_height = start_block_height;
-
   long start_time;
   long end_time;
   int txcount = 0;
@@ -72,6 +77,7 @@ int StatusThread(string dbname, ycsbc::DB *db, double interval,
     confirm_duration = PARITY_CONFIRM_BLOCK_LENGTH;
   else
     confirm_duration = HL_CONFIRM_BLOCK_LENGTH;
+
 
   while (true) {
     start_time = utils::time_now();
@@ -90,6 +96,7 @@ int StatusThread(string dbname, ycsbc::DB *db, double interval,
         string s = (dbname == "ethereum" || dbname == "parity")
                        ? tmp.substr(1, tmp.length() - 2)  // get rid of ""
                        : tmp;
+        // 若在已确认的区块中找到，说明tx已经确认
         if (pendingtx.find(s) != pendingtx.end()) {
           txcount++;
           latency += (block_time - pendingtx[s]);
@@ -99,6 +106,12 @@ int StatusThread(string dbname, ycsbc::DB *db, double interval,
       }
       txlock.unlock();
     }
+    thlock.lock();
+    if (txcount == 0 && thread_count == 0){
+        thlock.unlock();
+        return 0;
+    }
+    thlock.unlock();
     cout << "In the last " << interval << "s, tx count = " << txcount
          << " latency = " << latency / 1000000000.0
          << " outstanding request = " << pendingtx.size() << endl;
@@ -137,19 +150,21 @@ int main(const int argc, const char *argv[]) {
 
   const int num_threads = stoi(props.GetProperty("threadcount", "1"));
   const int txrate = stoi(props.GetProperty("txrate", "10"));
+  const int interval = stoi(props.GetProperty("gap", "2"));
 
   utils::Timer<double> stat_timer;
 
   // Loads data
   vector<future<int>> actual_ops;
   int total_ops = stoi(props[ycsbc::CoreWorkload::RECORD_COUNT_PROPERTY]);
+  thread_count = num_threads;
   for (int i = 0; i < num_threads; ++i) {
     actual_ops.emplace_back(async(launch::async, DelegateClient, db, &wl,
                                   total_ops / num_threads, true, txrate));
   }
 
   actual_ops.emplace_back(async(launch::async, StatusThread, props["dbname"],
-                                db, BLOCK_POLLING_INTERVAL, current_tip));
+                                db, interval, current_tip));
 
   int sum = 0;
   for (auto &n : actual_ops) {
@@ -172,6 +187,14 @@ string ParseCommandLine(int argc, const char *argv[],
       }
       props.SetProperty("threadcount", argv[argindex]);
       argindex++;
+    } else if (strcmp(argv[argindex], "-gap") == 0) {
+        argindex++;
+        if (argindex >= argc) {
+            UsageMessage(argv[0]);
+            exit(0);
+        }
+        props.SetProperty("gap", argv[argindex]);
+        argindex++;
     } else if (strcmp(argv[argindex], "-db") == 0) {
       argindex++;
       if (argindex >= argc) {

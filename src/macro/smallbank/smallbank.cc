@@ -86,9 +86,14 @@ int StatusThread(DB* sb, string dbname, string endpoint, double interval, int st
   else
     confirm_duration = HL_CONFIRM_BLOCK_LENGTH;
 
+  int preTip = -2;
   while(true){
     start_time = time_now(); 
-    int tip = sb->get_tip_block_number(); 
+    int tip = sb->get_tip_block_number();
+//    cout << "tip: " << tip << "preTip: " << preTip << endl;
+    if (tip == preTip) {
+        break;
+    }
     if (tip==-1) // fail
       sleep(interval); 
     while (cur_block_height + confirm_duration <= tip) {      
@@ -119,8 +124,9 @@ int StatusThread(DB* sb, string dbname, string endpoint, double interval, int st
 
     end_time = time_now(); 
 
-    //sleep in nanosecond
+    //sleep in second
     utils::sleep(interval - (end_time - start_time) / 1000000000.0);
+    preTip = tip;
   }
 return 0;
 }

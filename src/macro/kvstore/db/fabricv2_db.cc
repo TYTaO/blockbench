@@ -41,6 +41,7 @@ int FabricV2DB::Update(const string &table, const string &key,
   srand(time(NULL));
   size_t i = std::rand() % txnServiceAddrs.size();
 
+  // submit => js server
   std::string txn_hash = (sctype_ == BBUtils::SmartContractType::DoNothing)
                              ? submit_do_nothing_txn(txnServiceAddrs[i])
                              : submit_set_txn(txnServiceAddrs[i], key, val);

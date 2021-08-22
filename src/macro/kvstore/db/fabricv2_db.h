@@ -66,7 +66,7 @@ class FabricV2DB : public DB {
   }
 
   std::string endpoint_;
-  std::unordered_map<std::string, double> *pendingtx_;
+  std::unordered_map<std::string, double> *pendingtx_; // 记录tx以及发起的时间
   SpinLock *txlock_;
 
   BBUtils::SmartContractType sctype_;

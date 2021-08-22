@@ -11,6 +11,8 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
+const { resolve } = require('path');
+const { rejects } = require('assert');
 
 
 const argsLen = process.argv.length;
@@ -84,7 +86,7 @@ getChannel(channelName).then((network)=>{
         }
     };
     return network.addBlockListener(listener, {startBlock: 1});
-}).then(()=>{
+}).then(()=>{   
     const app = express();
 
     app.listen(port, () => {
